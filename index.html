@@ -392,14 +392,21 @@ details summary { cursor: pointer; color: var(--accent-ink); font-size: .9rem; }
       다음 문자 하나를 예측한다. 그런데 번역은 다르다 — 입력은 영어 5단어, 출력은 프랑스어 7단어일 수 있다.
       길이도 다르고, 어순도 다르다. <b>가변 길이 시퀀스를 가변 길이 시퀀스로</b> 사상하는 문제.</p>
       <p>seq2seq의 답은 문제를 둘로 쪼개는 것이다. <b>인코더 LSTM</b>이 입력을 끝까지 읽고
-      마지막 은닉 상태를 문맥 벡터 <code>c</code>로 삼는다. <b>디코더 LSTM</b>은 <code>c</code>를
+      마지막 상태(은닉 상태 <code>h</code>와 셀 상태 <code>C</code>)를 문맥 벡터 <code>c</code>로 삼는다. <b>디코더 LSTM</b>은 <code>c</code>를
       초기 상태로 받아, 직전에 자기가 생성한 단어를 다시 입력으로 넣으며(자기회귀)
       <code>&lt;EOS&gt;</code>가 나올 때까지 한 단어씩 출력한다.</p>
+      <p>단, 논문의 LSTM은 한 층이 아니라 <b>4층으로 쌓여</b> 있다. 그래서 실제 <code>c</code>는
+      벡터 하나가 아니라 <b>층마다 하나씩 있는 (h, C) 묶음</b>이고, 인코더 층 l의 마지막 상태가
+      디코더 층 l의 초기 상태로 1:1로 넘어간다. 아래 첫 데모는 흐름을 보기 위해 1층으로 단순화했고,
+      두 번째 데모가 층을 쌓은 실제 구조다.</p>
     </div>
 
-<pre><code>인코더:  h_t = LSTM_enc(h_{t-1}, x_t)        c = h_T        ← 문장 전체가 벡터 하나로
-디코더:  s_j = LSTM_dec(s_{j-1}, y_{j-1})     s_0 = c
-         p(y_j | y_&lt;j, x) = softmax(W · s_j)
+<pre><code>층 l = 1…L,  C는 셀 상태.  층 1의 입력은 단어,  층 l&gt;1의 입력은 바로 아래층의 h
+인코더:  (h_t^l, C_t^l) = LSTM_enc^l((h_{t-1}^l, C_{t-1}^l), h_t^{l-1})      h_t^0 = x_t
+문맥:    c = {(h_T^l, C_T^l)}_{l=1…L}           ← 문장 전체가 층별 (h, C) 묶음 하나로
+디코더:  (s_j^l, S_j^l) = LSTM_dec^l((s_{j-1}^l, S_{j-1}^l), s_j^{l-1})      s_j^0 = y_{j-1}
+         (s_0^l, S_0^l) = (h_T^l, C_T^l)        ← 같은 층끼리 이어받음
+         p(y_j | y_&lt;j, x) = softmax(W · s_j^L)   ← 출력은 맨 위층에서만
 목적:    P(y_1…y_U | x_1…x_T) = Π_j p(y_j | c, y_&lt;j)</code></pre>
 
     <div class="demo" id="archdemo">
@@ -425,7 +432,23 @@ details summary { cursor: pointer; color: var(--accent-ink); font-size: .9rem; }
       <div class="pdetail" id="arch-status">스텝 ▶ 버튼을 눌러 시작.</div>
     </div>
 
+    <div class="demo" id="stackdemo">
+      <div class="dhead"><span class="tag">DEMO</span><h4>층을 쌓으면: 다층 LSTM 인코더–디코더</h4></div>
+      <p class="dnote">가로는 시간, 세로는 층이다. 층 1은 단어를 입력으로 받고, 그 위층은 바로 아래층의 은닉 상태 h를 입력으로 받는다.
+      <b style="color:var(--s2)">주황 화살표</b>가 문맥 벡터 <code>c</code>의 정체다. 인코더의 각 층이 마지막 (h, C)를 디코더의 <b>같은 층</b>에 넘긴다.
+      층 수를 바꿔 보자.</p>
+      <div class="controls" id="stack-ctl">
+        <button data-l="1">1층</button>
+        <button data-l="2" class="primary">2층</button>
+        <button data-l="4">4층 (논문)</button>
+      </div>
+      <div class="svgbox" id="stack-svg"></div>
+      <div class="pdetail" id="stack-note"></div>
+    </div>
+
     <div class="callout">
+      층을 쌓은 이유: 논문은 깊은 LSTM이 얕은 LSTM보다 확연히 좋았고
+      <b>층을 하나 더할 때마다 perplexity가 10% 가까이</b> 줄었다고 보고한다.
       원논문의 실제 규모: <b>4층 LSTM × 층당 1,000셀</b>, 1,000차원 단어 임베딩,
       입력 어휘 16만 / 출력 어휘 8만, 총 <b>3억 8,400만 파라미터</b>.
       8-GPU 머신에서 약 10일 학습. WMT'14 영→불에서 5개 모델 앙상블 + 빔 서치로
@@ -635,7 +658,7 @@ A와 B는 매 배치 같은 문장을 받는다. B만 인코더 입력을 뒤집
       빔 서치, <code>&lt;EOS&gt;</code> 토큰 — 오늘의 LLM이 물려받은 유산 대부분이 이 6페이지 논문에서 왔다.</p>
     </div>
 
-<pre><code>seq2seq (2014):   c = h_T                        ← 벡터 하나에 전부
+<pre><code>seq2seq (2014):   c = {(h_T^l, C_T^l)}_l         ← 고정 크기 묶음 하나에 전부
 어텐션 (2015):    c_j = Σ_t α_{jt}·h_t            ← 생성 스텝마다 소스 전체를 다시 조회
 트랜스포머 (2017): 순환 제거, attention만으로       ← 5장에서 계속</code></pre>
 
@@ -750,7 +773,7 @@ addEventListener('scroll', () => {
     }
     if (step < 0) status.innerHTML = '스텝 ▶ 버튼을 눌러 시작.';
     else if (step < 4) status.innerHTML = `인코더가 <b>"${encTokens[step]}"</b>을 읽고 은닉 상태를 갱신했다. 지금까지 읽은 모든 단어의 요약이 이 ${8}칸(실제로는 1,000차원×4층)에 눌러 담긴다.`;
-    else if (step === 4) status.innerHTML = `<b>&lt;EOS&gt;</b>까지 읽었다. 마지막 은닉 상태가 곧 문맥 벡터 <b>c</b> — 입력 문장에 대해 디코더가 알게 될 <b>전부</b>다.`;
+    else if (step === 4) status.innerHTML = `<b>&lt;EOS&gt;</b>까지 읽었다. 마지막 상태가 곧 문맥 벡터 <b>c</b>(여기선 1층으로 단순화 — 실제로는 층별 (h, C) 묶음, 아래 데모 참고) — 입력 문장에 대해 디코더가 알게 될 <b>전부</b>다.`;
     else if (step === 5) status.innerHTML = `디코더가 <b>c</b>를 초기 상태로 받았다. 이제 인코더는 퇴장 — 디코더는 c와 자기가 만든 단어만 보고 문장을 생성한다.`;
     else if (step <= 9){
       const j = step - 6;
@@ -769,6 +792,74 @@ addEventListener('scroll', () => {
     timer = setInterval(() => { if (step < 9) next(); else stop(); }, 1100);
   };
   render();
+})();
+
+/* ========================================================
+   §1 stacked LSTM figure (1 / 2 / 4 layers)
+   ======================================================== */
+(function(){
+  const enc = ['I','am','a','student'];
+  const decIn = ['<EOS>','je','suis','étudiant'];
+  const decOut = ['je','suis','étudiant','<EOS>'];
+  const sup = '¹²³⁴';
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const box = $('#stack-svg'), note = $('#stack-note'), ctl = $('#stack-ctl');
+  function draw(L){
+    const W=660, LX=50, GAP=70, CW=50, CH=26, RH=50, TOP=64, BOT=40;
+    const colW = (W - LX - GAP - 6) / 8;
+    const H = TOP + L*RH + BOT;
+    const cx = i => LX + colW*(i+0.5) + (i >= 4 ? GAP : 0);  // i: 0..3 encoder, 4..7 decoder
+    const cy = l => TOP + (L-1-l)*RH + RH/2;                 // l: 0 = bottom layer
+    const arrow = (x1,y1,x2,y2) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--muted)" stroke-width="1.3" marker-end="url(#stk-a)"/>`;
+    let s = `<defs>
+      <marker id="stk-a" viewBox="0 0 8 8" refX="7" refY="4" markerUnits="userSpaceOnUse" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" style="fill:var(--muted)"/></marker>
+      <marker id="stk-h" viewBox="0 0 8 8" refX="7" refY="4" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto"><path d="M0 0L8 4L0 8z" style="fill:var(--s2)"/></marker>
+    </defs>`;
+    const midEnc = (cx(0)+cx(3))/2, midDec = (cx(4)+cx(7))/2, midGap = (cx(3)+cx(4))/2;
+    s += `<text x="${midEnc}" y="16" text-anchor="middle" font-size="12" font-weight="700" fill="var(--s1)">인코더</text>
+      <text x="${midDec}" y="16" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent-ink)">디코더</text>
+      <text x="${midGap}" y="16" text-anchor="middle" font-size="11" font-weight="700" fill="var(--s2)">c = 층별 (h, C)</text>`;
+    // dashed frame around the handoff = context c
+    const fx1 = cx(3)+CW/2+6, fx2 = cx(4)-CW/2-6, fy1 = cy(L-1)-CH/2-12, fy2 = cy(0)+CH/2+8;
+    s += `<rect x="${fx1}" y="${fy1}" width="${fx2-fx1}" height="${fy2-fy1}" rx="8" fill="none" stroke="var(--s2)" stroke-width="1" stroke-dasharray="4 3"/>`;
+    for (let l=0; l<L; l++){
+      const y = cy(l);
+      s += `<text x="4" y="${y+4}" font-size="11" fill="var(--muted)">층 ${l+1}</text>`;
+      for (let i=0; i<8; i++){
+        const isEnc = i < 4;
+        s += `<rect x="${cx(i)-CW/2}" y="${y-CH/2}" width="${CW}" height="${CH}" rx="6"
+          fill="var(${isEnc ? '--d-x' : '--accent-soft'})" stroke="var(${isEnc ? '--s1' : '--accent'})" stroke-width="1"/>
+          <text x="${cx(i)}" y="${y+3.5}" text-anchor="middle" font-size="9.5" fill="var(--ink2)">LSTM</text>`;
+        if (i !== 3 && i !== 7) s += arrow(cx(i)+CW/2, y, cx(i+1)-CW/2-1, y);       // recurrence (h, C) → next step
+        if (l < L-1) s += arrow(cx(i), y-CH/2, cx(i), cy(l+1)+CH/2+1);             // h → layer above
+      }
+      // handoff: encoder layer l final (h, C) → decoder layer l initial state
+      s += `<line x1="${cx(3)+CW/2}" y1="${y}" x2="${cx(4)-CW/2-1}" y2="${y}" stroke="var(--s2)" stroke-width="2.5" marker-end="url(#stk-h)"/>
+        <text x="${midGap}" y="${y-6}" text-anchor="middle" font-size="10" fill="var(--s2)">(h${sup[l]}, C${sup[l]})</text>`;
+    }
+    const yb = TOP + L*RH;
+    for (let i=0; i<8; i++){
+      const w = i < 4 ? enc[i] : decIn[i-4];
+      s += arrow(cx(i), yb+12, cx(i), cy(0)+CH/2+1) +
+        `<text x="${cx(i)}" y="${yb+28}" text-anchor="middle" font-size="11" fill="var(--ink)" class="mono">${esc(w)}</text>`;
+    }
+    for (let i=4; i<8; i++){
+      s += arrow(cx(i), cy(L-1)-CH/2, cx(i), TOP-12) +
+        `<text x="${cx(i)}" y="${TOP-17}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--accent-ink)" class="mono">${esc(decOut[i-4])}</text>`;
+    }
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" role="img" aria-label="${L}층 LSTM 인코더–디코더 구조도">${s}</svg>`;
+
+    const n = (L*2*1000).toLocaleString('ko-KR');
+    note.innerHTML = L === 1
+      ? `1층이면 <b>c</b>는 말 그대로 (h, C) 한 쌍이다. 위 데모가 그린 그림이 이것이다. 논문 규모(층당 1,000셀)로 치면 실수 <b>${n}</b>개.`
+      : `${L}층이면 인코더 층 l의 마지막 (h, C)가 디코더 층 l의 초기 상태로 <b>따로따로</b> 넘어간다(주황 화살표 ${L}개).
+         디코더가 받는 <b>c</b>는 벡터 하나가 아니라 <b>(h, C) × ${L}층</b> 묶음으로, 층당 1,000셀 기준 실수 <b>${n}</b>개다.
+         출력 softmax는 맨 위층(층 ${L})의 h에서만 계산한다.` +
+        (L === 4 ? ' 논문이 "문장 하나를 8,000개의 실수로 표현한다"고 한 숫자가 바로 4 × 2 × 1,000이다.' : '');
+    [...ctl.children].forEach(b => b.classList.toggle('primary', +b.dataset.l === L));
+  }
+  ctl.onclick = e => { const b = e.target.closest('button'); if (b) draw(+b.dataset.l); };
+  draw(2);
 })();
 
 /* ========================================================
@@ -1222,7 +1313,7 @@ const LAB = (function(){
   const QS = [
     { q: '입력 문장이 5단어에서 50단어로 늘어나면, 디코더에 전달되는 문맥 벡터 c의 크기는?',
       opts: ['10배로 커진다', '변하지 않는다 — 그래서 병목이다', '단어 수에 로그 비례해 커진다', '디코더가 필요한 만큼 요청한다'],
-      a: 1, expl: 'c는 인코더의 마지막 은닉 상태이므로 차원이 고정이다. 입력이 얼마나 길든 같은 크기에 압축해야 하고, 이것이 seq2seq의 근본 병목이다.' },
+      a: 1, expl: 'c는 인코더의 마지막 상태(층별 h, C)이므로 크기가 층 수 × 은닉 차원 × 2로 고정이다. 입력이 얼마나 길든 같은 크기에 압축해야 하고, 이것이 seq2seq의 근본 병목이다.' },
     { q: '입력 역순 트릭이 학습을 돕는 이유로 논문이 제시한 것은?',
       opts: ['평균 의존 거리가 절반으로 줄어서', '소스와 타깃 초반 단어 사이에 짧은 의존성이 생겨 최적화가 쉬워져서', '역순 문장이 문법적으로 더 단순해서', 'LSTM이 최근 입력을 먼저 잊기 때문에'],
       a: 1, expl: '평균 거리는 정확히 그대로다. 대신 y₁과 x₁의 거리가 1로 줄어 경사가 흐를 짧은 통로가 생기고, 이 발판에서 최적화가 굴러가기 시작한다. PPL 5.8→4.7, BLEU 25.9→30.6.' },
